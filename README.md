@@ -61,6 +61,25 @@ Proje tek dosyadan çalışacak şekilde tasarlanmıştır:
 python app_gui.py
 
 
+server_client_gui2/
+│
+├── app_gui.py          # Ana GUI (sunucu + istemci)
+├── client_gui.py       # Ayrık istemci (opsiyonel)
+├── server_gui.py       # Ayrık sunucu (opsiyonel)
+├── ciphers/
+│   ├── aes_lib.py
+│   ├── aes_manual.py
+│   ├── des_lib.py
+│   ├── des_manual_sdes.py
+│   ├── rsa_lib.py
+│   ├── caesar.py
+│   ├── vigenere.py
+│   └── ...
+├── README.md
+├── requirements.txt
+
+
+
 Uygulama açılınca iki sekme gelir:
 
 Sunucu
