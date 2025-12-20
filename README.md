@@ -32,6 +32,11 @@ Klasik kripto yöntemleri (Caesar, Vigenère, Playfair vb.) yanında **AES-128**
   - **S-DES(manual) + CBC** (manual)
   - **RSA-OAEP-SHA256** (lib)
 
+  - **KDF (PBKDF2-HMAC-SHA256):** Kullanıcının girdiği “Anahtar(Key)” metninden güvenli şekilde AES/DES anahtarı türetme (salt + iterasyon ile).
+
+  - **GUI İyileştirmeleri:** Arayüz, `ttkbootstrap` kullanılarak modern tema, renkli butonlar ve okunabilir log alanları ile geliştirilmiştir.
+
+
 ### 3) Dosya Gönderme
 - İstemci GUI’den dosya seçip gönderme
 - AES/DES/RSA seçiliyken dosya **şifreli** gider, sunucu çözüp `downloads/` içine kaydeder
@@ -53,7 +58,7 @@ Klasik kripto yöntemleri (Caesar, Vigenère, Playfair vb.) yanında **AES-128**
 ### Paket Kurulumu
 ```bash
 pip install pycryptodome
-
+pip install ttkbootstrap
 Çalıştırma
 
 Proje tek dosyadan çalışacak şekilde tasarlanmıştır:

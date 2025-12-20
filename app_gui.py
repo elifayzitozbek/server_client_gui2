@@ -2,8 +2,11 @@ import socket, threading, json, struct, base64
 import os, mimetypes
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
+import ttkbootstrap as tb
+from ttkbootstrap.constants import *
 
-from ciphers import apply  
+from ciphers import apply
+from ciphers.kdf import derive_key_pbkdf2  
 
 
 try:
@@ -20,7 +23,6 @@ except Exception:
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
-
 
 
 def pack_msg(header: dict, body: bytes) -> bytes:
@@ -141,7 +143,6 @@ def sdes_decrypt_cbc(ciphertext: bytes, key8: bytes, iv1: bytes) -> bytes:
         out.append(p)
         prev = c
     return bytes(out)
-
 
 
 _AES_SBOX = [
@@ -289,7 +290,6 @@ def aes128_cbc_decrypt_manual(ciphertext: bytes, key16: bytes, iv16: bytes) -> b
     return pkcs7_unpad(bytes(out), 16)
 
 
-
 def aes_encrypt_lib(plaintext: bytes, key: bytes, iv: bytes) -> bytes:
     cipher = C_AES.new(key, C_AES.MODE_CBC, iv=iv)
     return cipher.encrypt(c_pad(plaintext, 16))
@@ -351,12 +351,13 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("Sunucu + İstemci | Mesaj Şifreleme")
-        root.geometry("900x650")
+        root.geometry("980x700") 
 
-        self.nb = ttk.Notebook(root)
+        self._apply_makeup()
+
+        self.nb = tb.Notebook(root, bootstyle="primary")
         self.nb.pack(fill="both", expand=True)
 
-       
         self.server_sock = None
         self.server_conn = None
         self.server_thread = None
@@ -365,12 +366,13 @@ class App:
         self.client_sock = None
         self.client_recv_thread = None
 
-        
         self.server_pub_pem = None
         self.server_priv_pem = None
         self.client_server_pub_pem = None
 
        
+        self.use_kdf = tk.BooleanVar(value=False)
+
         self.server_tab = ttk.Frame(self.nb)
         self.client_tab = ttk.Frame(self.nb)
         self.nb.add(self.server_tab, text="Sunucu")
@@ -379,14 +381,22 @@ class App:
         self._build_server_tab()
         self._build_client_tab()
 
-   
+    def _apply_makeup(self):
+        try:
+            style = tb.Style()
+            style.configure(".", font=("Segoe UI", 10))
+            style.configure("TNotebook.Tab", padding=(14, 8))
+            style.configure("TButton", padding=(10, 6))
+            self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 10))
+        except Exception:
+            pass
+
     def log(self, box: scrolledtext.ScrolledText, msg: str):
         box.configure(state="normal")
         box.insert("end", msg + "\n")
         box.see("end")
         box.configure(state="disabled")
 
-   
     def _build_server_tab(self):
         top = ttk.Frame(self.server_tab)
         top.pack(fill="x", padx=10, pady=10)
@@ -404,12 +414,18 @@ class App:
         self.s_status = ttk.Label(top, text="Durum: Kapalı")
         self.s_status.pack(side="left", padx=12)
 
-        ttk.Button(top, text="Sunucuyu Başlat", command=self.start_server).pack(side="left", padx=6)
+        tb.Button(top, text="Sunucuyu Başlat", command=self.start_server, bootstyle="success").pack(side="left", padx=6)
 
         mid = ttk.Frame(self.server_tab)
         mid.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.s_log = scrolledtext.ScrolledText(mid, height=18, state="disabled")
+        self.s_log = scrolledtext.ScrolledText(
+            mid, height=18, state="disabled",
+            font=("Consolas", 10),
+            background="#0f1117", foreground="#e6e6e6",
+            insertbackground="#ffffff",
+            padx=10, pady=8, wrap="word", relief="flat"
+        )
         self.s_log.pack(fill="both", expand=True)
 
         bot = ttk.Frame(self.server_tab)
@@ -421,7 +437,8 @@ class App:
 
         self.s_entry = ttk.Entry(row)
         self.s_entry.pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="Gönder", command=self.server_send_text).pack(side="left", padx=8)
+
+        tb.Button(row, text="Gönder", command=self.server_send_text, bootstyle="primary").pack(side="left", padx=8)
 
     def set_server_status(self, text: str):
         self.s_status.config(text=f"Durum: {text}")
@@ -452,7 +469,6 @@ class App:
                 self.root.after(0, lambda: self.set_server_status(f"Bağlandı {addr}"))
                 self.root.after(0, lambda: self.log(self.s_log, f"[+] İstemci bağlandı: {addr}"))
 
-                
                 pub_body = self.server_pub_pem
                 self.server_conn.sendall(pack_msg({"type": "server_pub", "size": len(pub_body)}, pub_body))
                 self.root.after(0, lambda: self.log(self.s_log, "[*] RSA public key istemciye gönderildi."))
@@ -581,7 +597,7 @@ class App:
         except Exception as e:
             messagebox.showerror("Gönderme Hatası", str(e))
 
-   
+    
     def _build_client_tab(self):
         top = ttk.Frame(self.client_tab)
         top.pack(fill="x", padx=10, pady=10)
@@ -599,43 +615,71 @@ class App:
         self.c_status = ttk.Label(top, text="Durum: Bağlı değil")
         self.c_status.pack(side="left", padx=12)
 
-        ttk.Button(top, text="Bağlan", command=self.client_connect).pack(side="left", padx=6)
+        tb.Button(top, text="Bağlan", command=self.client_connect, bootstyle="success").pack(side="left", padx=6)
 
         opts = ttk.Frame(self.client_tab)
         opts.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(opts, text="Şifreleme Yöntemi:").pack(side="left")
+     
+        row1 = ttk.Frame(opts)
+        row1.pack(fill="x")
+
+        ttk.Label(row1, text="Şifreleme Yöntemi:").pack(side="left")
         self.c_cipher = tk.StringVar(value="caesar")
-        self.c_cipher_box = ttk.Combobox(
-            opts, textvariable=self.c_cipher, width=24, state="readonly",
+        self.c_cipher_box = tb.Combobox(
+            row1, textvariable=self.c_cipher, width=22, state="readonly",
             values=[
                 "caesar","substitution","playfair","vigenere","rail_fence",
                 "route_cipher","columnar_transposition","polybius","pigpen",
                 "affine","vernam","hill",
                 "AES","DES","RSA"
-            ]
+            ],
+            bootstyle="secondary"
         )
         self.c_cipher_box.pack(side="left", padx=8)
         self.c_cipher_box.bind("<<ComboboxSelected>>", self._on_cipher_change)
 
-        ttk.Label(opts, text="Anahtar(Key):").pack(side="left")
-        self.c_key = ttk.Entry(opts, width=30)
+        ttk.Label(row1, text="Anahtar(Key):").pack(side="left")
+        self.c_key = ttk.Entry(row1, width=26)
         self.c_key.insert(0, "3")
         self.c_key.pack(side="left", padx=8)
 
-        ttk.Label(opts, text="AES/DES Mod:").pack(side="left")
+        ttk.Label(row1, text="AES/DES Mod:").pack(side="left")
         self.c_impl = tk.StringVar(value="lib")
-        self.c_impl_box = ttk.Combobox(opts, textvariable=self.c_impl, width=10, state="readonly", values=["lib", "manual"])
+        self.c_impl_box = tb.Combobox(
+            row1, textvariable=self.c_impl, width=10, state="readonly",
+            values=["lib", "manual"], bootstyle="secondary"
+        )
         self.c_impl_box.pack(side="left", padx=6)
 
+       
+        tb.Checkbutton(
+            row1,
+            text="KDF (PBKDF2)",
+            variable=self.use_kdf,
+            bootstyle="info"
+        ).pack(side="left", padx=10)
+
+       
+        row2 = ttk.Frame(opts)
+        row2.pack(fill="x", pady=(6, 0))
+
+        ttk.Label(row2, text="Mod:").pack(side="left")
+
         self.c_mode = tk.StringVar(value="enc")
-        ttk.Radiobutton(opts, text="Şifrele", variable=self.c_mode, value="enc").pack(side="left", padx=8)
-        ttk.Radiobutton(opts, text="Çöz", variable=self.c_mode, value="dec").pack(side="left", padx=8)
+        tb.Radiobutton(row2, text="Şifrele", variable=self.c_mode, value="enc", bootstyle="success").pack(side="left", padx=10)
+        tb.Radiobutton(row2, text="Çöz", variable=self.c_mode, value="dec", bootstyle="warning").pack(side="left", padx=10)
 
         mid = ttk.Frame(self.client_tab)
         mid.pack(fill="both", expand=True, padx=10, pady=5)
 
-        self.c_log = scrolledtext.ScrolledText(mid, height=18, state="disabled")
+        self.c_log = scrolledtext.ScrolledText(
+            mid, height=18, state="disabled",
+            font=("Consolas", 10),
+            background="#0f1117", foreground="#e6e6e6",
+            insertbackground="#ffffff",
+            padx=10, pady=8, wrap="word", relief="flat"
+        )
         self.c_log.pack(fill="both", expand=True)
 
         bot = ttk.Frame(self.client_tab)
@@ -647,8 +691,9 @@ class App:
 
         self.c_entry = ttk.Entry(row)
         self.c_entry.pack(side="left", fill="x", expand=True)
-        ttk.Button(row, text="Gönder", command=self.client_send_text).pack(side="left", padx=8)
-        ttk.Button(row, text="Dosya Gönder", command=self.client_send_file).pack(side="left", padx=8)
+
+        tb.Button(row, text="Gönder", command=self.client_send_text, bootstyle="primary").pack(side="left", padx=8)
+        tb.Button(row, text="Dosya Gönder", command=self.client_send_file, bootstyle="warning").pack(side="left", padx=8)
 
         self._on_cipher_change()
 
@@ -750,7 +795,6 @@ class App:
                 messagebox.showerror("AES/DES/RSA Hatası", str(e))
                 return
 
-        
         try:
             out_msg = apply(cipher, mode, msg, key)
         except Exception as e:
@@ -819,7 +863,20 @@ class App:
             return header, ct
 
         if cipher == "AES":
-            sym_key = get_random_bytes(16)
+            
+            kdf_meta = None
+            if self.use_kdf.get():
+                salt = get_random_bytes(16)
+               
+                sym_key = derive_key_pbkdf2(self.c_key.get().strip(), salt, dk_len=16, iterations=200_000)
+                kdf_meta = {
+                    "kdf": "PBKDF2-HMAC-SHA256",
+                    "kdf_iters": 200_000,
+                    "kdf_salt_b64": base64.b64encode(salt).decode("utf-8"),
+                }
+            else:
+                sym_key = get_random_bytes(16)
+
             iv = get_random_bytes(16)
 
             if impl == "manual":
@@ -841,10 +898,24 @@ class App:
                 "iv_b64": base64.b64encode(iv).decode("utf-8"),
                 "wrapped_key_b64": base64.b64encode(wrapped).decode("utf-8"),
             }
+            if kdf_meta:
+                header.update(kdf_meta)
+
             return header, ct
 
         if cipher == "DES":
-            sym_key = get_random_bytes(8)
+            
+            kdf_meta = None
+            if self.use_kdf.get():
+                salt = get_random_bytes(16)
+                sym_key = derive_key_pbkdf2(self.c_key.get().strip(), salt, dk_len=8, iterations=200_000)
+                kdf_meta = {
+                    "kdf": "PBKDF2-HMAC-SHA256",
+                    "kdf_iters": 200_000,
+                    "kdf_salt_b64": base64.b64encode(salt).decode("utf-8"),
+                }
+            else:
+                sym_key = get_random_bytes(8)
 
             if impl == "manual":
                 iv = get_random_bytes(1)
@@ -867,12 +938,15 @@ class App:
                 "iv_b64": base64.b64encode(iv).decode("utf-8"),
                 "wrapped_key_b64": base64.b64encode(wrapped).decode("utf-8"),
             }
+            if kdf_meta:
+                header.update(kdf_meta)
+
             return header, ct
 
         raise ValueError("Desteklenmeyen cipher")
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = tb.Window(themename="cyborg")
     App(root)
     root.mainloop()

@@ -1,0 +1,6 @@
+# runtime çıktıları
+downloads/
+
+# python cache
+__pycache__/
+*.pyc
