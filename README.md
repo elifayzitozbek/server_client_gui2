@@ -68,20 +68,36 @@ python app_gui.py
 
 server_client_gui2/
 │
-├── app_gui.py          # Ana GUI (sunucu + istemci)
-├── client_gui.py       # Ayrık istemci (opsiyonel)
-├── server_gui.py       # Ayrık sunucu (opsiyonel)
-├── ciphers/
-│   ├── aes_lib.py
-│   ├── aes_manual.py
-│   ├── des_lib.py
-│   ├── des_manual_sdes.py
-│   ├── rsa_lib.py
-│   ├── caesar.py
-│   ├── vigenere.py
-│   └── ...
-├── README.md
+├── app_gui.py           # Ana uygulama (Sunucu + İstemci tek pencerede)
+├── client_gui.py        # Ayrık istemci (opsiyonel)
+├── server_gui.py        # Ayrık sunucu (opsiyonel)
+├── demo_ciphers.py      # Klasik şifrelerin hızlı testi/demo
 ├── requirements.txt
+├── README.md
+├── downloads/           # Sunucunun çözdüğü dosyaların kaydedildiği klasör (runtime)
+│   └── .gitignore       # downloads/ içeriği repoya gitmesin diye
+└── ciphers/
+    ├── __init__.py      # apply() ve modül yönlendirme
+    ├── dispatch.py      # AES/DES/RSA yönlendirme / ortak akış (varsa)
+    ├── kdf.py           # PBKDF2-HMAC-SHA256 ile anahtar türetme
+    ├── aes_lib.py
+    ├── aes_manual.py
+    ├── des_lib.py
+    ├── des_manual_sdes.py
+    ├── rsa_lib.py
+    ├── caesar.py
+    ├── vigenere.py
+    ├── playfair.py
+    ├── rail_fence.py
+    ├── route_cipher.py
+    ├── columnar_transposition.py
+    ├── polybius.py
+    ├── pigpen.py
+    ├── affine.py
+    ├── vernam.py
+    ├── hill.py
+    └── utils.py         
+
 
 
 
