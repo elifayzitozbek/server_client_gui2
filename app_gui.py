@@ -6,7 +6,11 @@ import ttkbootstrap as tb
 from ttkbootstrap.constants import *
 
 from ciphers import apply
-from ciphers.kdf import derive_key_pbkdf2  
+from ciphers.kdf import derive_key_pbkdf2
+
+
+from ciphers import ecc_lib
+from ciphers.kdf import derive_key_hkdf_sha256
 
 
 try:
@@ -351,7 +355,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("Sunucu + İstemci | Mesaj Şifreleme")
-        root.geometry("980x700") 
+        root.geometry("980x700")
 
         self._apply_makeup()
 
@@ -370,7 +374,10 @@ class App:
         self.server_priv_pem = None
         self.client_server_pub_pem = None
 
-       
+        self.server_ecc_priv = None
+        self.server_ecc_pub_der = None
+        self.client_server_ecc_pub_der = None
+
         self.use_kdf = tk.BooleanVar(value=False)
 
         self.server_tab = ttk.Frame(self.nb)
@@ -457,6 +464,10 @@ class App:
                 if self.server_pub_pem is None or self.server_priv_pem is None:
                     self.server_pub_pem, self.server_priv_pem = rsa_generate_keypair(2048)
 
+                
+                if self.server_ecc_priv is None or self.server_ecc_pub_der is None:
+                    self.server_ecc_priv, self.server_ecc_pub_der = ecc_lib.gen_server_static_keypair_p256()
+
                 self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.server_sock.bind((host, port))
@@ -469,9 +480,18 @@ class App:
                 self.root.after(0, lambda: self.set_server_status(f"Bağlandı {addr}"))
                 self.root.after(0, lambda: self.log(self.s_log, f"[+] İstemci bağlandı: {addr}"))
 
+               
                 pub_body = self.server_pub_pem
                 self.server_conn.sendall(pack_msg({"type": "server_pub", "size": len(pub_body)}, pub_body))
                 self.root.after(0, lambda: self.log(self.s_log, "[*] RSA public key istemciye gönderildi."))
+
+               
+                ecc_body = self.server_ecc_pub_der
+                self.server_conn.sendall(pack_msg(
+                    {"type": "server_kx", "kx": "ECDH-P256", "size": len(ecc_body)},
+                    ecc_body
+                ))
+                self.root.after(0, lambda: self.log(self.s_log, "[*] ECDH (P-256) public key istemciye gönderildi."))
 
                 self.server_recv_thread = threading.Thread(target=self.server_recv_loop, daemon=True)
                 self.server_recv_thread.start()
@@ -555,13 +575,41 @@ class App:
         if cipher == "RSA":
             return rsa_decrypt_chunked(body, self.server_priv_pem)
 
-        wrapped_b64 = header.get("wrapped_key_b64")
         iv_b64 = header.get("iv_b64")
-        if not wrapped_b64 or not iv_b64:
-            raise ValueError("wrapped_key_b64/iv_b64 eksik")
-
-        sym_key = rsa_unwrap_key(base64.b64decode(wrapped_b64), self.server_priv_pem)
+        if not iv_b64:
+            raise ValueError("iv_b64 eksik")
         iv = base64.b64decode(iv_b64)
+
+      
+        kx = header.get("kx", "RSA-OAEP")
+
+        if kx == "ECDH-P256":
+            if self.server_ecc_priv is None:
+                raise RuntimeError("Server ECC private key yok. Sunucuyu yeniden başlat.")
+
+            client_pub_b64 = header.get("client_eph_pub_b64")
+            salt_b64 = header.get("kdf_salt_b64")
+            info_b64 = header.get("kdf_info_b64")
+            if not client_pub_b64 or not salt_b64 or not info_b64:
+                raise ValueError("ECDH için client_eph_pub_b64 / kdf_salt_b64 / kdf_info_b64 eksik")
+
+            client_pub_der = base64.b64decode(client_pub_b64)
+            salt = base64.b64decode(salt_b64)
+            info = base64.b64decode(info_b64)
+
+            shared = ecc_lib.derive_shared_secret_p256(self.server_ecc_priv, client_pub_der)
+
+            if cipher == "AES":
+                sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=16, info=info)
+            elif cipher == "DES":
+                sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=8, info=info)
+            else:
+                raise ValueError("ECDH sadece AES/DES için")
+        else:
+            wrapped_b64 = header.get("wrapped_key_b64")
+            if not wrapped_b64:
+                raise ValueError("wrapped_key_b64 eksik")
+            sym_key = rsa_unwrap_key(base64.b64decode(wrapped_b64), self.server_priv_pem)
 
         if cipher == "AES":
             if mode == "manual":
@@ -597,7 +645,6 @@ class App:
         except Exception as e:
             messagebox.showerror("Gönderme Hatası", str(e))
 
-    
     def _build_client_tab(self):
         top = ttk.Frame(self.client_tab)
         top.pack(fill="x", padx=10, pady=10)
@@ -620,7 +667,6 @@ class App:
         opts = ttk.Frame(self.client_tab)
         opts.pack(fill="x", padx=10, pady=5)
 
-     
         row1 = ttk.Frame(opts)
         row1.pack(fill="x")
 
@@ -652,7 +698,15 @@ class App:
         )
         self.c_impl_box.pack(side="left", padx=6)
 
-       
+        ttk.Label(row1, text="Key Exchange:").pack(side="left")
+        self.c_kx = tk.StringVar(value="RSA-OAEP")
+        self.c_kx_box = tb.Combobox(
+            row1, textvariable=self.c_kx, width=12, state="readonly",
+            values=["RSA-OAEP", "ECDH-P256"],
+            bootstyle="secondary"
+        )
+        self.c_kx_box.pack(side="left", padx=6)
+
         tb.Checkbutton(
             row1,
             text="KDF (PBKDF2)",
@@ -660,7 +714,6 @@ class App:
             bootstyle="info"
         ).pack(side="left", padx=10)
 
-       
         row2 = ttk.Frame(opts)
         row2.pack(fill="x", pady=(6, 0))
 
@@ -701,14 +754,21 @@ class App:
         c = self.c_cipher.get().strip()
         if c in ("AES", "DES"):
             self.c_impl_box.configure(state="readonly")
+            self.c_kx_box.configure(state="readonly")
+            if self.c_kx.get() not in ("RSA-OAEP", "ECDH-P256"):
+                self.c_kx.set("RSA-OAEP")
             if self.c_impl.get() not in ("lib", "manual"):
                 self.c_impl.set("lib")
         elif c == "RSA":
             self.c_impl.set("lib")
             self.c_impl_box.configure(state="disabled")
+            self.c_kx.set("RSA-OAEP")
+            self.c_kx_box.configure(state="disabled")
         else:
             self.c_impl.set("lib")
             self.c_impl_box.configure(state="disabled")
+            self.c_kx.set("RSA-OAEP")
+            self.c_kx_box.configure(state="disabled")
 
     def client_connect(self):
         if self.client_sock:
@@ -746,6 +806,17 @@ class App:
                     pem = recvall(self.client_sock, size) if size else b""
                     self.client_server_pub_pem = pem
                     self.root.after(0, lambda: self.log(self.c_log, "[*] RSA public key alındı. (Hybrid AES/DES hazır)"))
+                    continue
+
+              
+                if typ == "server_kx":
+                    size = header.get("size", 0)
+                    ecc_pub = recvall(self.client_sock, size) if size else b""
+                    if header.get("kx") == "ECDH-P256":
+                        self.client_server_ecc_pub_der = ecc_pub
+                        self.root.after(0, lambda: self.log(self.c_log, "[*] ECDH public key alındı. (ECDH key exchange hazır)"))
+                    else:
+                        self.root.after(0, lambda: self.log(self.c_log, "[!] Bilinmeyen kx tipi alındı."))
                     continue
 
                 if typ == "text":
@@ -863,11 +934,10 @@ class App:
             return header, ct
 
         if cipher == "AES":
-            
             kdf_meta = None
+
             if self.use_kdf.get():
                 salt = get_random_bytes(16)
-               
                 sym_key = derive_key_pbkdf2(self.c_key.get().strip(), salt, dk_len=16, iterations=200_000)
                 kdf_meta = {
                     "kdf": "PBKDF2-HMAC-SHA256",
@@ -888,7 +958,40 @@ class App:
                 sym_name = "AES-128-CBC-PKCS7 (lib)"
                 mode_name = "lib"
 
-            wrapped = rsa_wrap_key(sym_key, server_pub_pem)
+            kx = self.c_kx.get().strip()
+
+            ecdh_meta = None
+            if kx == "ECDH-P256":
+                if self.client_server_ecc_pub_der is None:
+                    raise RuntimeError("ECDH public key alınmadı. Bağlandıktan sonra 1-2 sn bekle veya tekrar bağlan.")
+
+                client_priv, client_pub_der = ecc_lib.gen_client_ephemeral_keypair_p256()
+                shared = ecc_lib.derive_shared_secret_p256(client_priv, self.client_server_ecc_pub_der)
+
+                salt = get_random_bytes(16)
+                info = b"server_client_gui2-ecdh-aes"
+                sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=16, info=info)
+
+               
+                if impl == "manual":
+                    ct = aes128_cbc_encrypt_manual(plaintext, sym_key, iv)
+                    sym_name = "AES-128-CBC-PKCS7 (manual)"
+                    mode_name = "manual"
+                else:
+                    ct = aes_encrypt_lib(plaintext, sym_key, iv)
+                    sym_name = "AES-128-CBC-PKCS7 (lib)"
+                    mode_name = "lib"
+
+                ecdh_meta = {
+                    "kx": "ECDH-P256",
+                    "client_eph_pub_b64": base64.b64encode(client_pub_der).decode("utf-8"),
+                    "kdf": "HKDF-SHA256",
+                    "kdf_salt_b64": base64.b64encode(salt).decode("utf-8"),
+                    "kdf_info_b64": base64.b64encode(info).decode("utf-8"),
+                }
+            else:
+                ecdh_meta = {"kx": "RSA-OAEP"}
+
             header = {
                 "type": "text",
                 "size": len(ct),
@@ -896,16 +999,23 @@ class App:
                 "mode": mode_name,
                 "sym": sym_name,
                 "iv_b64": base64.b64encode(iv).decode("utf-8"),
-                "wrapped_key_b64": base64.b64encode(wrapped).decode("utf-8"),
             }
+
+            if ecdh_meta.get("kx") == "RSA-OAEP":
+                wrapped = rsa_wrap_key(sym_key, server_pub_pem)
+                header["wrapped_key_b64"] = base64.b64encode(wrapped).decode("utf-8")
+
+           
+            header.update(ecdh_meta)
+
             if kdf_meta:
                 header.update(kdf_meta)
 
             return header, ct
 
         if cipher == "DES":
-            
             kdf_meta = None
+
             if self.use_kdf.get():
                 salt = get_random_bytes(16)
                 sym_key = derive_key_pbkdf2(self.c_key.get().strip(), salt, dk_len=8, iterations=200_000)
@@ -928,7 +1038,42 @@ class App:
                 sym_name = "DES-CBC-PKCS7 (lib)"
                 mode_name = "lib"
 
-            wrapped = rsa_wrap_key(sym_key, server_pub_pem)
+            kx = self.c_kx.get().strip()
+
+            ecdh_meta = None
+            if kx == "ECDH-P256":
+                if self.client_server_ecc_pub_der is None:
+                    raise RuntimeError("ECDH public key alınmadı. Bağlandıktan sonra 1-2 sn bekle veya tekrar bağlan.")
+
+                client_priv, client_pub_der = ecc_lib.gen_client_ephemeral_keypair_p256()
+                shared = ecc_lib.derive_shared_secret_p256(client_priv, self.client_server_ecc_pub_der)
+
+                salt = get_random_bytes(16)
+                info = b"server_client_gui2-ecdh-des"
+                sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=8, info=info)
+
+                if impl == "manual":
+                   
+                    iv = get_random_bytes(1)
+                    ct = sdes_encrypt_cbc(plaintext, sym_key, iv)
+                    sym_name = "S-DES(manual)-CBC"
+                    mode_name = "manual"
+                else:
+                    iv = get_random_bytes(8)
+                    ct = des_encrypt_lib(plaintext, sym_key, iv)
+                    sym_name = "DES-CBC-PKCS7 (lib)"
+                    mode_name = "lib"
+
+                ecdh_meta = {
+                    "kx": "ECDH-P256",
+                    "client_eph_pub_b64": base64.b64encode(client_pub_der).decode("utf-8"),
+                    "kdf": "HKDF-SHA256",
+                    "kdf_salt_b64": base64.b64encode(salt).decode("utf-8"),
+                    "kdf_info_b64": base64.b64encode(info).decode("utf-8"),
+                }
+            else:
+                ecdh_meta = {"kx": "RSA-OAEP"}
+
             header = {
                 "type": "text",
                 "size": len(ct),
@@ -936,8 +1081,14 @@ class App:
                 "mode": mode_name,
                 "sym": sym_name,
                 "iv_b64": base64.b64encode(iv).decode("utf-8"),
-                "wrapped_key_b64": base64.b64encode(wrapped).decode("utf-8"),
             }
+
+            if ecdh_meta.get("kx") == "RSA-OAEP":
+                wrapped = rsa_wrap_key(sym_key, server_pub_pem)
+                header["wrapped_key_b64"] = base64.b64encode(wrapped).decode("utf-8")
+
+            header.update(ecdh_meta)
+
             if kdf_meta:
                 header.update(kdf_meta)
 
