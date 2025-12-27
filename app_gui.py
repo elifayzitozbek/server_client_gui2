@@ -1,5 +1,6 @@
 import socket, threading, json, struct, base64
 import os, mimetypes
+import hashlib
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import ttkbootstrap as tb
@@ -8,10 +9,8 @@ from ttkbootstrap.constants import *
 from ciphers import apply
 from ciphers.kdf import derive_key_pbkdf2
 
-
 from ciphers import ecc_lib
 from ciphers.kdf import derive_key_hkdf_sha256
-
 
 try:
     from Crypto.Cipher import AES as C_AES, DES as C_DES, PKCS1_OAEP
@@ -24,6 +23,7 @@ except Exception:
     c_pad = c_unpad = None
     get_random_bytes = None
     SHA256 = None
+
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
@@ -47,6 +47,14 @@ def recvall(sock: socket.socket, n: int):
 def _need_crypto():
     if C_AES is None or C_DES is None or RSA is None:
         raise RuntimeError("PyCryptodome yok. Kur: pip install pycryptodome")
+
+
+def fp_bytes(data: bytes, n=12) -> str:
+    if data is None:
+        return "-"
+    h = hashlib.sha256(data).hexdigest()
+    return h[:n]
+
 
 
 P10 = (3, 5, 2, 7, 4, 10, 1, 9, 8, 6)
@@ -74,8 +82,10 @@ def _lshift(bits, n): return bits[n:] + bits[:n]
 def _bits_from_int(x, n): return [(x >> (n-1-i)) & 1 for i in range(n)]
 def _int_from_bits(b):
     x = 0
-    for v in b: x = (x << 1) | v
+    for v in b:
+        x = (x << 1) | v
     return x
+
 def _sbox(box, b4):
     row = (b4[0] << 1) | b4[3]
     col = (b4[1] << 1) | b4[2]
@@ -101,7 +111,6 @@ def _key_schedule(key10bits):
     return k1, k2
 
 def _derive_10bit_key_from_8bytes(key8: bytes) -> list[int]:
-    import hashlib
     h = hashlib.sha256(key8).digest()
     v = int.from_bytes(h[:2], "big") & ((1 << 10) - 1)
     return _bits_from_int(v, 10)
@@ -168,7 +177,8 @@ _AES_SBOX = [
     0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
 ]
 _AES_INV_SBOX = [0]*256
-for i,v in enumerate(_AES_SBOX): _AES_INV_SBOX[v]=i
+for i, v in enumerate(_AES_SBOX):
+    _AES_INV_SBOX[v] = i
 _AES_RCON = [0x00,0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80,0x1B,0x36]
 
 def _xtime(a): return ((a << 1) ^ 0x1B) & 0xFF if (a & 0x80) else (a << 1) & 0xFF
@@ -220,7 +230,8 @@ def _rot_word(w): return w[1:] + w[:1]
 def _sub_word(w): return [_AES_SBOX[b] for b in w]
 
 def aes128_key_expansion(key16: bytes):
-    if len(key16) != 16: raise ValueError("Manual AES key 16 byte olmalı (AES-128).")
+    if len(key16) != 16:
+        raise ValueError("Manual AES key 16 byte olmalı (AES-128).")
     key = list(key16)
     w = [key[i:i+4] for i in range(0, 16, 4)]
     for i in range(4, 44):
@@ -257,7 +268,7 @@ def aes128_decrypt_block(block16: bytes, key16: bytes) -> bytes:
 
 def pkcs7_pad(data: bytes, block_size: int) -> bytes:
     padlen = block_size - (len(data) % block_size)
-    return data + bytes([padlen])*padlen
+    return data + bytes([padlen]) * padlen
 
 def pkcs7_unpad(data: bytes, block_size: int) -> bytes:
     if not data or len(data) % block_size != 0:
@@ -265,7 +276,7 @@ def pkcs7_unpad(data: bytes, block_size: int) -> bytes:
     padlen = data[-1]
     if padlen < 1 or padlen > block_size:
         raise ValueError("PKCS7 unpad: pad value invalid")
-    if data[-padlen:] != bytes([padlen])*padlen:
+    if data[-padlen:] != bytes([padlen]) * padlen:
         raise ValueError("PKCS7 unpad: pad bytes invalid")
     return data[:-padlen]
 
@@ -292,6 +303,7 @@ def aes128_cbc_decrypt_manual(ciphertext: bytes, key16: bytes, iv16: bytes) -> b
         out += pt
         prev = ct
     return pkcs7_unpad(bytes(out), 16)
+
 
 
 def aes_encrypt_lib(plaintext: bytes, key: bytes, iv: bytes) -> bytes:
@@ -378,6 +390,7 @@ class App:
         self.server_ecc_pub_der = None
         self.client_server_ecc_pub_der = None
 
+       
         self.use_kdf = tk.BooleanVar(value=False)
 
         self.server_tab = ttk.Frame(self.nb)
@@ -461,10 +474,10 @@ class App:
         def run():
             try:
                 _need_crypto()
+
                 if self.server_pub_pem is None or self.server_priv_pem is None:
                     self.server_pub_pem, self.server_priv_pem = rsa_generate_keypair(2048)
 
-                
                 if self.server_ecc_priv is None or self.server_ecc_pub_der is None:
                     self.server_ecc_priv, self.server_ecc_pub_der = ecc_lib.gen_server_static_keypair_p256()
 
@@ -472,26 +485,40 @@ class App:
                 self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.server_sock.bind((host, port))
                 self.server_sock.listen(1)
+
                 self.root.after(0, lambda: self.set_server_status(f"Dinlemede {host}:{port}"))
                 self.root.after(0, lambda: self.log(self.s_log, f"[+] Dinlemede: {host}:{port}"))
 
                 conn, addr = self.server_sock.accept()
                 self.server_conn = conn
+
                 self.root.after(0, lambda: self.set_server_status(f"Bağlandı {addr}"))
                 self.root.after(0, lambda: self.log(self.s_log, f"[+] İstemci bağlandı: {addr}"))
 
-               
                 pub_body = self.server_pub_pem
                 self.server_conn.sendall(pack_msg({"type": "server_pub", "size": len(pub_body)}, pub_body))
-                self.root.after(0, lambda: self.log(self.s_log, "[*] RSA public key istemciye gönderildi."))
 
-               
+                pem_text = pub_body.decode("utf-8", errors="replace").strip()
+                self.root.after(0, lambda: self.log(
+                    self.s_log,
+                    "[RSA PUBLIC KEY - SERVER]\n" +
+                    pem_text +
+                    f"\n(pub_fp={fp_bytes(pub_body)} | len={len(pub_body)})"
+                ))
+
+             
                 ecc_body = self.server_ecc_pub_der
                 self.server_conn.sendall(pack_msg(
                     {"type": "server_kx", "kx": "ECDH-P256", "size": len(ecc_body)},
                     ecc_body
                 ))
-                self.root.after(0, lambda: self.log(self.s_log, "[*] ECDH (P-256) public key istemciye gönderildi."))
+                ecc_b64 = base64.b64encode(ecc_body).decode("utf-8")
+                self.root.after(0, lambda: self.log(
+                    self.s_log,
+                    "[ECDH PUBLIC KEY - SERVER] (DER b64)\n" +
+                    ecc_b64 +
+                    f"\n(pub_fp={fp_bytes(ecc_body)} | len={len(ecc_body)})"
+                ))
 
                 self.server_recv_thread = threading.Thread(target=self.server_recv_loop, daemon=True)
                 self.server_recv_thread.start()
@@ -511,6 +538,7 @@ class App:
                 if not hlen_raw:
                     self.root.after(0, lambda: self.log(self.s_log, "[-] Bağlantı kapandı."))
                     break
+
                 hlen = struct.unpack(">I", hlen_raw)[0]
                 header = json.loads(recvall(self.server_conn, hlen).decode("utf-8"))
                 typ = header.get("type")
@@ -524,8 +552,12 @@ class App:
                     if cipher in ("AES", "DES", "RSA"):
                         try:
                             pt = self.server_decrypt_payload(header, body)
-                            msg = pt.decode("utf-8", errors="replace")
-                            self.root.after(0, lambda: self.log(self.s_log, f"[İSTEMCİ] ({cipher}/{mode}) {msg}"))
+                            msg_pt = pt.decode("utf-8", errors="replace")
+                            ct_b64 = base64.b64encode(body).decode("utf-8")
+                            self.root.after(0, lambda: self.log(
+                                self.s_log,
+                                f"[İSTEMCİ] ({cipher}/{mode}) PT='{msg_pt}' | CT(b64)={ct_b64[:90]}..."
+                            ))
                         except Exception as e:
                             self.root.after(0, lambda: self.log(self.s_log, f"[HATA] decrypt failed ({cipher}/{mode}): {e}"))
                     else:
@@ -554,7 +586,10 @@ class App:
                         with open(save_path, "wb") as f:
                             f.write(raw)
 
-                        self.root.after(0, lambda: self.log(self.s_log, f"[DOSYA] ({cipher}/{mode}) Kaydedildi: {save_path} ({mimetype}) {len(raw)} bytes"))
+                        self.root.after(0, lambda: self.log(
+                            self.s_log,
+                            f"[DOSYA] ({cipher}/{mode}) Kaydedildi: {save_path} ({mimetype}) {len(raw)} bytes"
+                        ))
                     except Exception as e:
                         self.root.after(0, lambda: self.log(self.s_log, f"[HATA] DOSYA decrypt/save failed ({cipher}/{mode}): {e}"))
 
@@ -562,6 +597,11 @@ class App:
                     size = header.get("size", 0)
                     _ = recvall(self.server_conn, size) if size else b""
                     self.root.after(0, lambda: self.log(self.s_log, "[*] server_pub alındı (ignore)."))
+
+                elif typ == "server_kx":
+                    size = header.get("size", 0)
+                    _ = recvall(self.server_conn, size) if size else b""
+                    self.root.after(0, lambda: self.log(self.s_log, "[*] server_kx alındı (ignore)."))
 
                 else:
                     self.root.after(0, lambda: self.log(self.s_log, f"[!] Bilinmeyen type: {typ}"))
@@ -580,7 +620,6 @@ class App:
             raise ValueError("iv_b64 eksik")
         iv = base64.b64decode(iv_b64)
 
-      
         kx = header.get("kx", "RSA-OAEP")
 
         if kx == "ECDH-P256":
@@ -616,16 +655,14 @@ class App:
                 if len(sym_key) != 16 or len(iv) != 16:
                     raise ValueError("AES manual: key 16, iv 16 olmalı")
                 return aes128_cbc_decrypt_manual(body, sym_key, iv)
-            else:
-                return aes_decrypt_lib(body, sym_key, iv)
+            return aes_decrypt_lib(body, sym_key, iv)
 
         if cipher == "DES":
             if mode == "manual":
                 if len(iv) != 1:
                     raise ValueError("DES manual (S-DES): iv 1 byte olmalı")
                 return sdes_decrypt_cbc(body, sym_key, iv)
-            else:
-                return des_decrypt_lib(body, sym_key, iv)
+            return des_decrypt_lib(body, sym_key, iv)
 
         raise ValueError("Desteklenmeyen cipher")
 
@@ -707,12 +744,16 @@ class App:
         )
         self.c_kx_box.pack(side="left", padx=6)
 
-        tb.Checkbutton(
+        
+        self.kdf_chk = tb.Checkbutton(
             row1,
             text="KDF (PBKDF2)",
             variable=self.use_kdf,
             bootstyle="info"
-        ).pack(side="left", padx=10)
+        )
+        self.kdf_chk.pack(side="left", padx=10)
+        self.use_kdf.set(False)
+        self.kdf_chk.configure(state="disabled")
 
         row2 = ttk.Frame(opts)
         row2.pack(fill="x", pady=(6, 0))
@@ -748,10 +789,20 @@ class App:
         tb.Button(row, text="Gönder", command=self.client_send_text, bootstyle="primary").pack(side="left", padx=8)
         tb.Button(row, text="Dosya Gönder", command=self.client_send_file, bootstyle="warning").pack(side="left", padx=8)
 
+        self.client_server_pub_pem = None
+        self.client_server_ecc_pub_der = None
+
         self._on_cipher_change()
 
     def _on_cipher_change(self, *_):
         c = self.c_cipher.get().strip()
+
+        
+        if c in ("AES", "DES", "RSA"):
+            self.c_key.configure(state="disabled")
+        else:
+            self.c_key.configure(state="normal")
+
         if c in ("AES", "DES"):
             self.c_impl_box.configure(state="readonly")
             self.c_kx_box.configure(state="readonly")
@@ -769,6 +820,13 @@ class App:
             self.c_impl_box.configure(state="disabled")
             self.c_kx.set("RSA-OAEP")
             self.c_kx_box.configure(state="disabled")
+
+        
+        self.use_kdf.set(False)
+        try:
+            self.kdf_chk.configure(state="disabled")
+        except Exception:
+            pass
 
     def client_connect(self):
         if self.client_sock:
@@ -805,16 +863,28 @@ class App:
                     size = header.get("size", 0)
                     pem = recvall(self.client_sock, size) if size else b""
                     self.client_server_pub_pem = pem
-                    self.root.after(0, lambda: self.log(self.c_log, "[*] RSA public key alındı. (Hybrid AES/DES hazır)"))
+
+                    pem_text = pem.decode("utf-8", errors="replace").strip()
+                    self.root.after(0, lambda: self.log(
+                        self.c_log,
+                        "[RSA PUBLIC KEY - RECEIVED]\n" +
+                        pem_text +
+                        f"\n(pub_fp={fp_bytes(pem)} | len={len(pem)})"
+                    ))
                     continue
 
-              
                 if typ == "server_kx":
                     size = header.get("size", 0)
                     ecc_pub = recvall(self.client_sock, size) if size else b""
                     if header.get("kx") == "ECDH-P256":
                         self.client_server_ecc_pub_der = ecc_pub
-                        self.root.after(0, lambda: self.log(self.c_log, "[*] ECDH public key alındı. (ECDH key exchange hazır)"))
+                        ecc_b64 = base64.b64encode(ecc_pub).decode("utf-8")
+                        self.root.after(0, lambda: self.log(
+                            self.c_log,
+                            "[ECDH PUBLIC KEY - RECEIVED] (DER b64)\n" +
+                            ecc_b64 +
+                            f"\n(pub_fp={fp_bytes(ecc_pub)} | len={len(ecc_pub)})"
+                        ))
                     else:
                         self.root.after(0, lambda: self.log(self.c_log, "[!] Bilinmeyen kx tipi alındı."))
                     continue
@@ -826,6 +896,27 @@ class App:
                     mode = header.get("mode", "-")
                     msg = data.decode("utf-8", errors="replace")
                     self.root.after(0, lambda: self.log(self.c_log, f"[SUNUCU] ({cipher}/{mode}) {msg}"))
+                    continue
+
+                if typ == "file":
+                    size = header.get("size", 0)
+                    data = recvall(self.client_sock, size) if size else b""
+                    filename = header.get("filename", "file.bin")
+                    mimetype = header.get("mimetype", "application/octet-stream")
+                    cipher = header.get("cipher", "-")
+                    mode = header.get("mode", "-")
+
+                    os.makedirs("downloads", exist_ok=True)
+                    safe_name = os.path.basename(filename)
+                    save_path = os.path.join("downloads", f"client_{safe_name}")
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+
+                    self.root.after(0, lambda: self.log(self.c_log, f"[SUNUCU] FILE ({cipher}/{mode}) Kaydedildi: {save_path} ({mimetype})"))
+                    continue
+
+                self.root.after(0, lambda: self.log(self.c_log, f"[!] Bilinmeyen type: {typ}"))
+
         except Exception as e:
             self.root.after(0, lambda: self.log(self.c_log, f"[HATA] {e}"))
 
@@ -858,7 +949,6 @@ class App:
 
                 ct_b64 = base64.b64encode(body).decode("utf-8")
                 self.log(self.c_log, f"[İSTEMCİ] ({cipher}/{header.get('mode')}) CT(b64)={ct_b64[:90]}...")
-
                 self.c_entry.delete(0, "end")
                 return
 
@@ -877,7 +967,12 @@ class App:
 
         try:
             self.client_sock.sendall(pkt)
-            self.log(self.c_log, f"[İSTEMCİ] ({cipher}/{mode}) {out_msg}")
+
+            if mode == "enc":
+                self.log(self.c_log, f"[İSTEMCİ] ({cipher}/{mode}) Plain='{msg}' | Cipher='{out_msg}'")
+            else:
+                self.log(self.c_log, f"[İSTEMCİ] ({cipher}/{mode}) Cipher='{msg}' | Plain='{out_msg}'")
+
             self.c_entry.delete(0, "end")
         except Exception as e:
             messagebox.showerror("Gönderme Hatası", str(e))
@@ -927,10 +1022,20 @@ class App:
         except Exception as e:
             messagebox.showerror("Dosya Gönderme Hatası", str(e))
 
-    def client_encrypt_payload(self, cipher: str, impl: str, plaintext: bytes, server_pub_pem: bytes) -> tuple[dict, bytes]:
+    def client_encrypt_payload(self, cipher: str, impl: str, plaintext: bytes, server_pub_pem: bytes):
+
+        
+        self.use_kdf.set(False)
+
         if cipher == "RSA":
             ct = rsa_encrypt_chunked(plaintext, server_pub_pem)
-            header = {"type": "text", "size": len(ct), "cipher": "RSA", "mode": "lib", "asym": "RSA-OAEP-SHA256"}
+            header = {
+                "type": "text",
+                "size": len(ct),
+                "cipher": "RSA",
+                "mode": "lib",
+                "asym": "RSA-OAEP-SHA256"
+            }
             return header, ct
 
         if cipher == "AES":
@@ -972,7 +1077,6 @@ class App:
                 info = b"server_client_gui2-ecdh-aes"
                 sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=16, info=info)
 
-               
                 if impl == "manual":
                     ct = aes128_cbc_encrypt_manual(plaintext, sym_key, iv)
                     sym_name = "AES-128-CBC-PKCS7 (manual)"
@@ -1005,7 +1109,6 @@ class App:
                 wrapped = rsa_wrap_key(sym_key, server_pub_pem)
                 header["wrapped_key_b64"] = base64.b64encode(wrapped).decode("utf-8")
 
-           
             header.update(ecdh_meta)
 
             if kdf_meta:
@@ -1053,7 +1156,6 @@ class App:
                 sym_key = derive_key_hkdf_sha256(shared, salt, dk_len=8, info=info)
 
                 if impl == "manual":
-                   
                     iv = get_random_bytes(1)
                     ct = sdes_encrypt_cbc(plaintext, sym_key, iv)
                     sym_name = "S-DES(manual)-CBC"

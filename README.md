@@ -1,175 +1,75 @@
-# AES–DES–RSA + Klasik Şifreler | İstemci–Sunucu GUI | (Lib + Manual) | Wireshark Analizi
+# AES–DES–RSA + Klasik Şifreler
+## İstemci–Sunucu GUI | (Lib + Manual) | Wireshark Analizi
 
-Bu proje, istemci ile sunucu arasında TCP tabanlı haberleşme kurarak şifreli mesaj ve dosya iletimi yapan bir masaüstü uygulamasıdır. Uygulama Python dili ile geliştirilmiş olup grafik arayüz için Tkinter ve ttkbootstrap kullanılmıştır.
+Bu proje; istemci ile sunucu arasında **şifreli mesaj ve dosya iletimi** yapan bir masaüstü uygulamasıdır (Tkinter GUI).  
+Klasik kripto algoritmaları (Caesar, Vigenère, Playfair vb.) ile birlikte **AES-128, DES, RSA ve ECC (ECDH)** destekler.
 
-Proje kapsamında klasik şifreleme algoritmaları ile birlikte modern kriptografik algoritmalar olan AES, DES ve RSA kullanılmıştır. AES ve DES algoritmaları hem kriptografik kütüphaneler kullanılarak hem de manuel (sadeleştirilmiş) şekilde uygulanmıştır. RSA algoritması manuel olarak yazılmamış, asimetrik şifreleme ve anahtar dağıtımı amacıyla kullanılmıştır.
+## Genel Yapı
 
-Bu çalışma ile simetrik ve asimetrik şifreleme algoritmalarının istemci–sunucu mimarisinde birlikte nasıl kullanıldığı, ağ trafiğine etkileri ve paket yapılarının Wireshark üzerinden nasıl gözlemlenebildiği uygulamalı olarak gösterilmiştir.
+- **Lib Modu:**  
+  AES, DES, RSA ve ECC işlemleri kriptografik kütüphaneler ile yapılır.
 
----
+- **Manuel Mod:**
+  - AES-128-CBC (temel round işlemleri ile)
+  - S-DES (Simplified DES – sadeleştirilmiş versiyon)
 
-## Desteklenen Şifreleme Algoritmaları
+> **Not:**  
+> RSA bu projede mesaj şifrelemeden çok **anahtar değişimi** amacıyla kullanılmıştır.  
+> ECC tarafında **ECDH-P256** ile ortak anahtar üretilmektedir.  
+> **KDF (PBKDF2)** seçeneği arayüzde **devre dışıdır**.
 
-### Klasik Şifreleme Yöntemleri
-- Caesar
-- Substitution
-- Playfair
-- Vigenère
-- Rail Fence
-- Route Cipher
-- Columnar Transposition
-- Polybius
-- Pigpen
-- Affine
-- Vernam
-- Hill
+## Özellikler
 
-Bu algoritmalar için şifreleme ve çözme işlemleri istemci tarafında gerçekleştirilir. Kullanıcı arayüzünde “Şifrele / Çöz” modu aktif olarak kullanılabilir.
+- TCP tabanlı istemci–sunucu haberleşmesi  
+- Otomatik **RSA / ECC public key** değişimi (kullanıcı girişi gerekmez)  
+- AES / DES / RSA / ECC ile şifreli mesaj ve dosya gönderimi  
+- Klasik şifreleme algoritmaları desteği  
+- Dosyaların sunucu tarafında `downloads/` klasörüne kaydedilmesi  
+- Wireshark ile paket boyutu ve ciphertext analizi  
+- `ttkbootstrap` ile modern GUI  
 
----
+## Desteklenen Algoritmalar
 
-### Modern Şifreleme Yöntemleri
+### Klasik
+- Caesar, Substitution, Playfair, Vigenère  
+- Rail Fence, Route Cipher, Columnar Transposition  
+- Polybius, Pigpen, Affine, Vernam, Hill  
 
-- AES-128-CBC + PKCS7 (Kütüphaneli)
-- AES-128-CBC + PKCS7 (Manuel)
-- DES-CBC + PKCS7 (Kütüphaneli)
-- S-DES + CBC (Manuel)
-- RSA-OAEP-SHA256
-
-AES ve DES algoritmaları simetrik şifreleme amacıyla kullanılır. Bu algoritmalar seçildiğinde veri AES veya DES ile şifrelenir ve kullanılan simetrik anahtar RSA-OAEP yöntemi ile şifrelenerek sunucuya gönderilir.
-
-RSA algoritması doğrudan seçildiğinde veri asimetrik olarak şifrelenir. RSA ile şifrelenen paketlerin boyutlarının diğer algoritmalara göre daha büyük olduğu gözlemlenebilir.
-
----
-
-## İstemci–Sunucu Mimarisi
-
-Uygulama TCP soketleri kullanılarak geliştirilmiştir. İstemci ve sunucu arasında gönderilen tüm veriler belirli bir paket formatına sahiptir.
-
-Paket yapısı:
-- 4 byte header uzunluğu
-- JSON formatında header bilgisi
-- Binary veri (body)
-
-Sunucu, istemci bağlandığında RSA public key bilgisini otomatik olarak istemciye gönderir. İstemci bu anahtarı kullanarak simetrik anahtarları veya veriyi RSA ile şifreler.
-
-Sunucu tarafında gelen veriler çözülür ve çözülen plaintext mesajlar sunucu log ekranında gösterilir.
-
----
-
-## Manuel Şifreleme Modu
-
-Ödev gereksinimleri doğrultusunda AES ve DES algoritmalarının sadeleştirilmiş manuel implementasyonları yapılmıştır.
-
-- AES-128 manuel implementasyonu:
-  - Key Expansion
-  - SubBytes
-  - ShiftRows
-  - MixColumns
-  - AddRoundKey
-  - CBC modu ve PKCS7 padding
-
-- DES manuel implementasyonu:
-  - S-DES (Simplified DES)
-  - CBC modu
-  - Bit permütasyonları ve S-Box yapısı
-
-Bu manuel implementasyonlar sayesinde algoritmaların iç çalışma yapısı doğrudan gözlemlenebilir.
-
----
-
-## Anahtar Türetme (KDF)
-
-AES ve DES için kullanıcı tarafından girilen anahtar metni PBKDF2-HMAC-SHA256 algoritması kullanılarak anahtara dönüştürülebilir. Bu işlem sırasında salt ve iterasyon sayısı kullanılarak güvenli anahtar üretimi sağlanır.
-
-KDF seçeneği aktif edilmediğinde anahtarlar rastgele olarak üretilir.
-
----
-
-## Dosya Gönderme
-
-İstemci uygulaması üzerinden dosya gönderimi yapılabilir.
-
-AES, DES veya RSA seçildiğinde dosyalar şifrelenerek sunucuya gönderilir. Sunucu tarafında dosya çözülür ve `downloads/` klasörü içerisine kaydedilir.
-
-Sunucu log ekranında dosya adı, kullanılan algoritma ve çözülen veri boyutu görüntülenir.
-
-Klasik şifreleme algoritmaları seçildiğinde dosya plain olarak gönderilir.
-
----
-
-## Wireshark Analizi
-
-Uygulama üzerinden gönderilen TCP paketleri Wireshark ile yakalanarak analiz edilmiştir.
-
-- Paket payload alanlarının okunamaz (ciphertext) olduğu gözlemlenmiştir
-- AES, DES ve RSA algoritmaları kullanıldığında paket boyutları karşılaştırılmıştır
-- RSA algoritmasının OAEP padding ve chunking nedeniyle daha büyük veri ürettiği gösterilmiştir
-- Manuel ve kütüphaneli şifreleme çıktıları karşılaştırılmıştır
-
----
+### Modern
+- AES-128-CBC (lib / manual)  
+- DES-CBC (lib)  
+- S-DES (manual)  
+- RSA-OAEP  
+- ECC (ECDH-P256)  
 
 ## Kurulum
 
-### Gereksinimler
-- Python 3.10 veya üzeri
+Python **3.10+** önerilir.
 
-### Bağımlılıkların Kurulumu
+Gerekli paketleri kurmak için:
+
 ```bash
 pip install -r requirements.txt
-Çalıştırma
-bash
-python app_gui.py
-Uygulama açıldığında iki sekme bulunmaktadır:
 
-Sunucu
+## Dosya Dizin Yapısı
 
-İstemci
-
-Kullanım
-Sunucu
-IP ve Port bilgileri girilir
-
-Sunucuyu Başlat butonuna basılır
-
-İstemci bağlandığında RSA public key otomatik olarak gönderilir
-
-İstemci
-IP ve Port bilgileri girilir
-
-Bağlan butonuna basılır
-
-Şifreleme algoritması seçilir
-
-Mesaj yazılarak Gönder butonuna basılır
-
-Dosya göndermek için Dosya Gönder butonu kullanılır
-
-AES, DES ve RSA algoritmaları seçildiğinde gönderim her zaman şifreli yapılır. Çözme işlemi sunucu tarafında gerçekleştirilir.
-
-Proje Yapısı
-markdown
-Kodu kopyala
-server_client_gui2/
-│
-├── app_gui.py
-├── client_gui.py
-├── server_gui.py
-├── demo_ciphers.py
-├── requirements.txt
+```text
+odev_kripto2/
+├── app_gui.py          # Ana uygulama (Sunucu + İstemci tek GUI)
+├── client_gui.py       # Ayrık istemci arayüzü (opsiyonel)
+├── server_gui.py       # Ayrık sunucu arayüzü (opsiyonel)
+├── demo_ciphers.py     # Klasik şifreler için demo/test
 ├── README.md
-├── downloads/
+├── requirements.txt
+├── downloads/          # Sunucuda çözülen dosyalar (runtime)
 │   └── .gitignore
 └── ciphers/
-    ├── __init__.py
-    ├── dispatch.py
-    ├── kdf.py
-    ├── ecc_lib.py
     ├── aes_lib.py
     ├── aes_manual.py
     ├── des_lib.py
     ├── des_manual_sdes.py
     ├── rsa_lib.py
+    ├── ecc_lib.py
     ├── caesar.py
     ├── vigenere.py
     ├── playfair.py
@@ -182,3 +82,6 @@ server_client_gui2/
     ├── vernam.py
     ├── hill.py
     └── utils.py
+
+Çalıştırma
+python app_gui.py
